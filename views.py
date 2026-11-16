@@ -1,51 +1,77 @@
 import pygame
 from settings import *
 from hanoi_model import HanoiModel
+from algorithm import hanoi_moves_generator
 
 # Global state and model instances
 current_mode = "solver"
 hanoi_game = HanoiModel(num_disks=3)
 
 # Solver mode specific state
+
+# Solver mode state
 solver_num_disks = 3
-solver_state = "idle" # "idle" or "solving"
+solver_state = "idle"  # "idle", "solving", "completed"
 solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
+solver_generator = None
+animation_frame_counter = 0
+ANIMATION_DELAY = 15  # Adjust speed here if needed (framerates per move)
+
+# Smooth animation states
+solver_state = "idle"       # "idle", "solving", "completed"
+current_anim_move = None    # Holds (disk, src, tgt)
+anim_phase = None           # "LIFT", "SLIDE", "DROP"
+anim_disk_pos = [0, 0]      # Current floating pixel (x, y)
+anim_target_y = 0           # Target landing y coordinate
+ANIMATION_SPEED = 8         # Pixels per frame for smooth glide speed
 
 def toggle_mode():
     global current_mode
     current_mode = "manual" if current_mode == "solver" else "solver"
 
 def handle_events_solver(event):
-    global current_mode, solver_num_disks, solver_state, solver_pegs
+    global current_mode, solver_num_disks, solver_state, solver_pegs, solver_generator, animation_frame_counter, current_anim_move
     if event.type == pygame.MOUSEBUTTONDOWN:
-        # Toggle button
         btn_mode_rect = pygame.Rect(30, 545, 150, 32)
         if btn_mode_rect.collidepoint(event.pos):
-            toggle_mode()
+            if solver_state != "solving":  # Prevent mode switch mid-solve
+                toggle_mode()
             return
 
-        # If solver is currently running/solving, disable button clicks
+        # Solve / Reset button: Rect(190, 545, 110, 32)
+        btn_solve_rect = pygame.Rect(190, 545, 110, 32)
+        if btn_solve_rect.collidepoint(event.pos):
+            if solver_state == "idle":
+                # Start solving
+                solver_state = "solving"
+                solver_generator = hanoi_moves_generator(solver_num_disks, 0, 2, 1)
+                animation_frame_counter = 0
+            elif solver_state == "completed":
+                # Reset solver
+                solver_state = "idle"
+                solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
+                solver_generator = None
+            return
+
+        # Lock disk counter buttons while solving
         if solver_state == "solving":
             return
 
-        # Solve button: Rect(190, 545, 110, 32)
-        btn_solve_rect = pygame.Rect(190, 545, 110, 32)
-        if btn_solve_rect.collidepoint(event.pos):
-            solver_state = "solving"
-            return
-
-        # Disk counter box controls: "Disks: [ - | count | + ]" starting around x: 380, y: 545
-        # Minus button: Rect(440, 548, 22, 26)
-        # Plus button: Rect(500, 548, 22, 26)
-        btn_minus = pygame.Rect(440, 548, 22, 26)
-        btn_plus = pygame.Rect(500, 548, 22, 26)
+        btn_minus = pygame.Rect(382, 549, 24, 24)
+        btn_plus = pygame.Rect(500, 549, 24, 24)
 
         if btn_minus.collidepoint(event.pos):
             solver_num_disks = max(3, solver_num_disks - 1)
             solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
+            solver_state = "idle"  # <--- Reset state to idle
+            solver_generator = None
+            current_anim_move = None
         elif btn_plus.collidepoint(event.pos):
             solver_num_disks = min(15, solver_num_disks + 1)
             solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
+            solver_state = "idle"  # <--- Reset state to idle
+            solver_generator = None
+            current_anim_move = None
 
 def handle_events_manual(event):
     global current_mode
@@ -176,8 +202,6 @@ def draw_solver_towers(screen, font):
     panel_width = 540
 
     peg_centers = [panel_left + 135, panel_left + 270, panel_left + 405]
-    
-    # Base positioned lower to accommodate 2x taller vertical space
     base_y = panel_top + 460
     base_width = 460
     base_rect = pygame.Rect(0, 0, base_width, 14)
@@ -196,14 +220,14 @@ def draw_solver_towers(screen, font):
         peg_rect.bottom = base_y
         pygame.draw.rect(screen, BORDER_COLOR, peg_rect, border_radius=3)
 
-    # Draw Tower Labels: source, extra, destination
+    # Draw Tower Labels
     labels = ["source", "extra", "destination"]
     for i, cx in enumerate(peg_centers):
         lbl_surf = font.render(labels[i], True, (240, 245, 250))
         lbl_rect = lbl_surf.get_rect(center=(cx, base_y + 25))
         screen.blit(lbl_surf, lbl_rect)
 
-    # Draw Disks (proportioned for up to 15 disks with clear numbering)
+    # Draw Disks on Pegs
     disk_height = 18
     max_disk_width = 130
     min_disk_width = 30
@@ -220,10 +244,94 @@ def draw_solver_towers(screen, font):
             pygame.draw.rect(screen, color, d_rect, border_radius=3)
             pygame.draw.rect(screen, BORDER_COLOR, d_rect, 1, border_radius=3)
 
-            # Disk number inside disk
             num_surf = font.render(str(disk_size), True, BG_COLOR)
             num_rect = num_surf.get_rect(center=d_rect.center)
             screen.blit(num_surf, num_rect)
+
+    # Draw animated floating disk if moving
+    if current_anim_move is not None:
+        disk_size, src, tgt = current_anim_move
+        d_width = min_disk_width + (disk_size - 1) * ((max_disk_width - min_disk_width) / max(1, 14))
+        
+        d_rect = pygame.Rect(0, 0, int(d_width), disk_height)
+        d_rect.center = (int(anim_disk_pos[0]), int(anim_disk_pos[1]))
+        
+        color = DISK_COLORS[(disk_size - 1) % len(DISK_COLORS)]
+        pygame.draw.rect(screen, color, d_rect, border_radius=3)
+        pygame.draw.rect(screen, BORDER_COLOR, d_rect, 1, border_radius=3)
+
+        num_surf = font.render(str(disk_size), True, BG_COLOR)
+        num_rect = num_surf.get_rect(center=d_rect.center)
+        screen.blit(num_surf, num_rect)
+
+def update_solver_animation():
+    global solver_state, solver_generator, solver_pegs, current_anim_move, anim_phase, anim_disk_pos, anim_target_y
+    
+    panel_left = 15
+    panel_top = 15
+    peg_centers = [panel_left + 135, panel_left + 270, panel_left + 405]
+    base_y = panel_top + 460
+    disk_height = 18
+
+    if solver_state == "solving":
+        if current_anim_move is None and solver_generator is not None:
+            try:
+                disk, src, tgt = next(solver_generator)
+                if solver_pegs[src]:
+                    # Pop disk from source model immediately for tracking, animate it
+                    d = solver_pegs[src].pop()
+                    current_anim_move = (d, src, tgt)
+                    
+                    # Start LIFT phase from current source top position
+                    src_level = len(solver_pegs[src]) # level after pop
+                    start_x = peg_centers[src]
+                    start_y = base_y - (src_level * (disk_height + 2)) - disk_height // 2
+                    
+                    anim_disk_pos = [float(start_x), float(start_y)]
+                    anim_phase = "LIFT"
+            except StopIteration:
+                solver_state = "completed"
+                solver_generator = None
+                current_anim_move = None
+
+        # Execute kinematic animation phases
+        if current_anim_move is not None:
+            disk, src, tgt = current_anim_move
+            target_x = float(peg_centers[tgt])
+            # Hover lift height well above pegs
+            lift_y = float(panel_top + 80)
+            
+            # Target landing y calculation
+            tgt_level = len(solver_pegs[tgt])
+            landing_y = float(base_y - (tgt_level * (disk_height + 2)) - disk_height // 2)
+
+            if anim_phase == "LIFT":
+                # Move upward to lift_y
+                if anim_disk_pos[1] > lift_y:
+                    anim_disk_pos[1] = max(lift_y, anim_disk_pos[1] - ANIMATION_SPEED)
+                else:
+                    anim_phase = "SLIDE"
+
+            elif anim_phase == "SLIDE":
+                # Slide horizontally towards target peg X
+                if abs(anim_disk_pos[0] - target_x) > ANIMATION_SPEED:
+                    if anim_disk_pos[0] < target_x:
+                        anim_disk_pos[0] += ANIMATION_SPEED
+                    else:
+                        anim_disk_pos[0] -= ANIMATION_SPEED
+                else:
+                    anim_disk_pos[0] = target_x
+                    anim_phase = "DROP"
+
+            elif anim_phase == "DROP":
+                # Lower downward onto target peg stack
+                if anim_disk_pos[1] < landing_y:
+                    anim_disk_pos[1] = min(landing_y, anim_disk_pos[1] + ANIMATION_SPEED)
+                else:
+                    # Animation step finished: push disk onto target peg
+                    solver_pegs[tgt].append(disk)
+                    current_anim_move = None
+                    anim_phase = None
 
 def draw_screen_solver(screen, font):
     screen.fill(BG_COLOR)
@@ -246,20 +354,30 @@ def draw_screen_solver(screen, font):
     btn_mode_rect = pygame.Rect(30, 545, 150, 32)
     draw_button(screen, font, "Mode: Solver", btn_mode_rect, active=True)
 
-    # 2. Solve Button (Next to toggle)
+    # 2. Solve / Reset Button (Next to toggle)
     btn_solve_rect = pygame.Rect(190, 545, 110, 32)
-    if solver_state == "solving":
-        # Non-clickable / disabled solving state styling
+    if solver_state == "idle":
+        # Green Idle Button
+        pygame.draw.rect(screen, ACCENT_GREEN, btn_solve_rect, border_radius=6)
+        pygame.draw.rect(screen, BORDER_COLOR, btn_solve_rect, 2, border_radius=6)
+        txt_surf = font.render("Solve", True, BG_COLOR)
+        screen.blit(txt_surf, txt_surf.get_rect(center=btn_solve_rect.center))
+    elif solver_state == "solving":
+        # Disabled Solving State
         pygame.draw.rect(screen, (60, 70, 85), btn_solve_rect, border_radius=6)
         pygame.draw.rect(screen, BORDER_COLOR, btn_solve_rect, 2, border_radius=6)
         txt_surf = font.render("Solving...", True, (150, 160, 170))
         screen.blit(txt_surf, txt_surf.get_rect(center=btn_solve_rect.center))
     else:
-        draw_button(screen, font, "Solve", btn_solve_rect, active=False)
+        # Red Reset Button after completion
+        pygame.draw.rect(screen, ACCENT_RED, btn_solve_rect, border_radius=6)
+        pygame.draw.rect(screen, BORDER_COLOR, btn_solve_rect, 2, border_radius=6)
+        txt_surf = font.render("Reset", True, BG_COLOR)
+        screen.blit(txt_surf, txt_surf.get_rect(center=btn_solve_rect.center))
 
     # 3. Disk Counter Component: "Disks: [ - | count | + ]"
     lbl_disks = font.render("Disks:", True, BRIGHT_TEXT)
-    screen.blit(lbl_disks, (325, 551))
+    screen.blit(lbl_disks, (315, 551))
 
     # Outer container box for counter
     counter_box = pygame.Rect(375, 545, 155, 32)
@@ -394,5 +512,7 @@ def draw_screen_manual(screen, font):
 def draw_screen(screen, font):
     if current_mode == "solver":
         draw_screen_solver(screen, font)
+        update_solver_animation()
+
     else:
         draw_screen_manual(screen, font)

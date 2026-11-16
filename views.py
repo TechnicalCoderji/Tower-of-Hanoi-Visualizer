@@ -22,6 +22,7 @@ anim_phase = None           # "LIFT", "SLIDE", "DROP"
 
 # Step counter and solver states
 solver_num_disks = 3
+active_call_stack = []
 solver_state = "idle"
 solver_current_step = 0
 solver_total_steps = (2 ** solver_num_disks) - 1
@@ -293,13 +294,14 @@ def update_solver_animation():
         if current_anim_move is None and solver_generator is not None:
             try:
                 item = next(solver_generator)
-                current_n, src, tgt, line_num, depth, disk = item
-                global active_code_line, current_recursion_depth, active_code_n
+                current_n, src, tgt, line_num, depth, disk, stack_frames = item
+                global active_code_line, current_recursion_depth, active_code_n, active_call_stack
                 active_code_line = line_num
                 current_recursion_depth = depth
-                active_code_n = current_n  # <--- Captures the real n of this frame!
+                active_code_n = current_n
+                active_call_stack = stack_frames  # <--- Capture current stack list!
 
-                if disk is not None:  # Actual disk move triggered at line 4
+                if disk is not None:  
                     if solver_pegs[src]:
                         d = solver_pegs[src].pop()
                         current_anim_move = (d, src, tgt)
@@ -352,6 +354,65 @@ def update_solver_animation():
                     current_anim_move = None
                     anim_phase = None
                     solver_current_step += 1
+
+def draw_call_stack_panel(screen, font):
+    stack_rect = pygame.Rect(570, 300, 315, 275)
+    pygame.draw.rect(screen, PANEL_BG, stack_rect, border_radius=8)
+    pygame.draw.rect(screen, BORDER_COLOR, stack_rect, 2, border_radius=8)
+    
+    # Title
+    screen.blit(font.render("Call Stack (Beaker View)", True, (240, 245, 250)), (585, 310))
+
+    # Inner beaker container box
+    inner_box = pygame.Rect(582, 340, 291, 225)
+    pygame.draw.rect(screen, (25, 29, 36), inner_box, border_radius=6)
+    pygame.draw.rect(screen, BORDER_COLOR, inner_box, 1, border_radius=6)
+
+    stack_font = pygame.font.SysFont("Courier New", 15, True)
+
+    if solver_state == "idle" or not active_call_stack:
+        placeholder = stack_font.render("Stack empty (Idle)", True, (100, 110, 120))
+        screen.blit(placeholder, (inner_box.x + 15, inner_box.y + 15))
+        return
+
+    max_visible = 5
+    total_elements = len(active_call_stack)
+    overflow_count = max(0, total_elements - max_visible)
+
+    # Start drawing from the bottom of the inner box
+    start_y = inner_box.bottom - 36
+
+    # 1. If there is an overflow, reserve the very bottom slot for "(+ X more elements)"
+    if overflow_count > 0:
+        overflow_str = f"(+ {overflow_count} more elements)"
+        overflow_surf = stack_font.render(overflow_str, True, (140, 150, 160))
+        screen.blit(overflow_surf, (inner_box.x + 15, start_y + 6))
+        start_y -= 36  # Shift upward so active frames stack above it
+
+    # 2. Slice to show the most recent active frames (cutoff the bottom/older ones)
+    visible_frames = active_call_stack[-max_visible:] if overflow_count > 0 else active_call_stack
+
+    # 3. Draw the active frames upward from start_y
+    for frame in visible_frames:
+        n_val = frame['n']
+        src_val = frame['src']
+        tgt_val = frame['tgt']
+        aux_val = frame['aux']
+
+        try:
+            disk_col = DISK_COLORS[n_val - 1] if 0 <= n_val - 1 < len(DISK_COLORS) else (152, 195, 121)
+        except (TypeError, IndexError):
+            disk_col = (152, 195, 121)
+
+        strip_rect = pygame.Rect(inner_box.x + 6, start_y, inner_box.width - 12, 32)
+        pygame.draw.rect(screen, (35, 41, 51), strip_rect, border_radius=5)
+        pygame.draw.rect(screen, disk_col, (strip_rect.x, strip_rect.y, 6, strip_rect.height), border_top_left_radius=5, border_bottom_left_radius=5)
+
+        text_str = f"solve(n={n_val}, {src_val}, {tgt_val}, {aux_val})"
+        txt_surf = stack_font.render(text_str, True, (220, 225, 230))
+        screen.blit(txt_surf, (strip_rect.x + 16, strip_rect.y + 6))
+
+        start_y -= 36  # Move upward for the next element
 
 def draw_algorithm_code_panel(screen, font):
     code_rect = pygame.Rect(570, 15, 315, 275)
@@ -473,14 +534,10 @@ def draw_screen_solver(screen, font):
     screen.blit(step_surf, (step_box_rect.x + step_padding, step_box_rect.y + 5))
 
     # 2. Code Panel (Top Right)
-    # 2. Code Panel (Top Right)
     draw_algorithm_code_panel(screen, font)
 
-    # 3. Stack Beaker Panel (Bottom Right)
-    stack_rect = pygame.Rect(570, 305, 315, 285)
-    pygame.draw.rect(screen, PANEL_BG, stack_rect, border_radius=8)
-    pygame.draw.rect(screen, BORDER_COLOR, stack_rect, 2, border_radius=8)
-    screen.blit(font.render("Call Stack (Beaker View)", True, BRIGHT_TEXT), (585, 320))
+    # 3. Call Stack Panel (Bottom Right)
+    draw_call_stack_panel(screen, font)
 
 def draw_screen_manual(screen, font):
     screen.fill(BG_COLOR)

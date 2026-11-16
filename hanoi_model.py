@@ -7,12 +7,16 @@ class HanoiModel:
         self.dragging_disk = None
         self.source_peg = None
         self.drag_pos = (0, 0)
+        self.move_count = 0
+        self.game_status = "start"  # "start", "running", "completed"
 
     def reset(self, num_disks=3):
         self.num_disks = num_disks
         self.pegs = [list(range(num_disks, 0, -1)), [], []]
         self.dragging_disk = None
         self.source_peg = None
+        self.move_count = 0
+        self.game_status = "start"
 
     def get_peg_from_pos(self, x):
         """Maps x coordinate to peg index (0, 1, or 2) within the left panel."""
@@ -42,16 +46,22 @@ class HanoiModel:
             x, y = pos
             target_peg = self.get_peg_from_pos(x)
             
+            valid_move = False
             if target_peg is not None:
-                # Check valid move: target peg empty OR top disk is larger than dragging disk
                 if not self.pegs[target_peg] or self.pegs[target_peg][-1] > self.dragging_disk:
                     self.pegs[target_peg].append(self.dragging_disk)
+                    valid_move = True
                 else:
-                    # Invalid move: return disk to source peg
                     self.pegs[self.source_peg].append(self.dragging_disk)
             else:
-                # Dropped outside valid peg area: return to source peg
                 self.pegs[self.source_peg].append(self.dragging_disk)
+
+            if valid_move and target_peg != self.source_peg:
+                self.move_count += 1
+                self.game_status = "running"
+                # Check win condition: all disks on destination peg (peg 2)
+                if len(self.pegs[2]) == self.num_disks:
+                    self.game_status = "completed"
 
             self.dragging_disk = None
             self.source_peg = None

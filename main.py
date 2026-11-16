@@ -25,8 +25,8 @@ def main():
         pygame.display.flip()
         clock.tick(FPS)
 
-    pygame.quit()
-    exit()
-
 if __name__ == "__main__":
     main()
+
+    pygame.quit()
+    exit()

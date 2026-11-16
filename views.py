@@ -3,18 +3,49 @@ from settings import *
 from hanoi_model import HanoiModel
 
 # Global state and model instances
-current_mode = "manual"
+current_mode = "solver"
 hanoi_game = HanoiModel(num_disks=3)
+
+# Solver mode specific state
+solver_num_disks = 3
+solver_state = "idle" # "idle" or "solving"
+solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
 
 def toggle_mode():
     global current_mode
     current_mode = "manual" if current_mode == "solver" else "solver"
 
 def handle_events_solver(event):
+    global current_mode, solver_num_disks, solver_state, solver_pegs
     if event.type == pygame.MOUSEBUTTONDOWN:
-        btn_rect = pygame.Rect(30, 545, 150, 32)
-        if btn_rect.collidepoint(event.pos):
+        # Toggle button
+        btn_mode_rect = pygame.Rect(30, 545, 150, 32)
+        if btn_mode_rect.collidepoint(event.pos):
             toggle_mode()
+            return
+
+        # If solver is currently running/solving, disable button clicks
+        if solver_state == "solving":
+            return
+
+        # Solve button: Rect(190, 545, 110, 32)
+        btn_solve_rect = pygame.Rect(190, 545, 110, 32)
+        if btn_solve_rect.collidepoint(event.pos):
+            solver_state = "solving"
+            return
+
+        # Disk counter box controls: "Disks: [ - | count | + ]" starting around x: 380, y: 545
+        # Minus button: Rect(440, 548, 22, 26)
+        # Plus button: Rect(500, 548, 22, 26)
+        btn_minus = pygame.Rect(440, 548, 22, 26)
+        btn_plus = pygame.Rect(500, 548, 22, 26)
+
+        if btn_minus.collidepoint(event.pos):
+            solver_num_disks = max(3, solver_num_disks - 1)
+            solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
+        elif btn_plus.collidepoint(event.pos):
+            solver_num_disks = min(15, solver_num_disks + 1)
+            solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
 
 def handle_events_manual(event):
     global current_mode
@@ -139,29 +170,125 @@ def draw_hanoi_towers(screen, font):
         num_rect = num_surf.get_rect(center=d_rect.center)
         screen.blit(num_surf, num_rect)
 
+def draw_solver_towers(screen, font):
+    panel_left = 15
+    panel_top = 15
+    panel_width = 540
+
+    peg_centers = [panel_left + 135, panel_left + 270, panel_left + 405]
+    
+    # Base positioned lower to accommodate 2x taller vertical space
+    base_y = panel_top + 460
+    base_width = 460
+    base_rect = pygame.Rect(0, 0, base_width, 14)
+    base_rect.centerx = panel_left + panel_width // 2
+    base_rect.y = base_y
+
+    # Draw Base
+    pygame.draw.rect(screen, BORDER_COLOR, base_rect, border_radius=4)
+
+    # Draw 3 Vertical Pegs (2x taller: height 340)
+    peg_width = 10
+    peg_height = 340
+    for cx in peg_centers:
+        peg_rect = pygame.Rect(0, 0, peg_width, peg_height)
+        peg_rect.centerx = cx
+        peg_rect.bottom = base_y
+        pygame.draw.rect(screen, BORDER_COLOR, peg_rect, border_radius=3)
+
+    # Draw Tower Labels: source, extra, destination
+    labels = ["source", "extra", "destination"]
+    for i, cx in enumerate(peg_centers):
+        lbl_surf = font.render(labels[i], True, (240, 245, 250))
+        lbl_rect = lbl_surf.get_rect(center=(cx, base_y + 25))
+        screen.blit(lbl_surf, lbl_rect)
+
+    # Draw Disks (proportioned for up to 15 disks with clear numbering)
+    disk_height = 18
+    max_disk_width = 130
+    min_disk_width = 30
+
+    for peg_idx, disks in enumerate(solver_pegs):
+        cx = peg_centers[peg_idx]
+        for level, disk_size in enumerate(disks):
+            d_width = min_disk_width + (disk_size - 1) * ((max_disk_width - min_disk_width) / max(1, 14))
+            d_rect = pygame.Rect(0, 0, int(d_width), disk_height)
+            d_rect.centerx = cx
+            d_rect.bottom = base_y - (level * (disk_height + 2))
+
+            color = DISK_COLORS[(disk_size - 1) % len(DISK_COLORS)]
+            pygame.draw.rect(screen, color, d_rect, border_radius=3)
+            pygame.draw.rect(screen, BORDER_COLOR, d_rect, 1, border_radius=3)
+
+            # Disk number inside disk
+            num_surf = font.render(str(disk_size), True, BG_COLOR)
+            num_rect = num_surf.get_rect(center=d_rect.center)
+            screen.blit(num_surf, num_rect)
+
 def draw_screen_solver(screen, font):
     screen.fill(BG_COLOR)
+    
+    BRIGHT_TEXT = (240, 245, 250)
+
+    # 1. Main Tower Panel
     main_tower_rect = pygame.Rect(15, 15, 540, 575)
     pygame.draw.rect(screen, PANEL_BG, main_tower_rect, border_radius=8)
     pygame.draw.rect(screen, BORDER_COLOR, main_tower_rect, 2, border_radius=8)
     
-    txt_tower_title = font.render("Main Visualization (Three Towers)", True, TEXT_COLOR)
+    txt_tower_title = font.render("Main Visualization (Computer Solver)", True, BRIGHT_TEXT)
     screen.blit(txt_tower_title, (30, 30))
 
-    btn_rect = pygame.Rect(30, 545, 150, 32)
-    draw_button(screen, font, "Mode: Solver", btn_rect, active=True)
+    # Draw Towers
+    draw_solver_towers(screen, font)
 
+    # --- Bottom Row Controls ---
+    # 1. Mode Toggle Button
+    btn_mode_rect = pygame.Rect(30, 545, 150, 32)
+    draw_button(screen, font, "Mode: Solver", btn_mode_rect, active=True)
+
+    # 2. Solve Button (Next to toggle)
+    btn_solve_rect = pygame.Rect(190, 545, 110, 32)
+    if solver_state == "solving":
+        # Non-clickable / disabled solving state styling
+        pygame.draw.rect(screen, (60, 70, 85), btn_solve_rect, border_radius=6)
+        pygame.draw.rect(screen, BORDER_COLOR, btn_solve_rect, 2, border_radius=6)
+        txt_surf = font.render("Solving...", True, (150, 160, 170))
+        screen.blit(txt_surf, txt_surf.get_rect(center=btn_solve_rect.center))
+    else:
+        draw_button(screen, font, "Solve", btn_solve_rect, active=False)
+
+    # 3. Disk Counter Component: "Disks: [ - | count | + ]"
+    lbl_disks = font.render("Disks:", True, BRIGHT_TEXT)
+    screen.blit(lbl_disks, (325, 551))
+
+    # Outer container box for counter
+    counter_box = pygame.Rect(375, 545, 155, 32)
+    pygame.draw.rect(screen, (35, 39, 46), counter_box, border_radius=6)
+    pygame.draw.rect(screen, BORDER_COLOR, counter_box, 1, border_radius=6)
+
+    # Minus button inside box
+    btn_minus = pygame.Rect(382, 549, 24, 24)
+    draw_button(screen, font, "-", btn_minus, active=False)
+
+    # Disk number display
+    val_surf = font.render(str(solver_num_disks), True, BRIGHT_TEXT)
+    screen.blit(val_surf, val_surf.get_rect(center=(452, counter_box.centery)))
+
+    # Plus button inside box
+    btn_plus = pygame.Rect(500, 549, 24, 24)
+    draw_button(screen, font, "+", btn_plus, active=False)
+
+    # 2. Code Panel (Top Right)
     code_rect = pygame.Rect(570, 15, 315, 275)
     pygame.draw.rect(screen, PANEL_BG, code_rect, border_radius=8)
     pygame.draw.rect(screen, BORDER_COLOR, code_rect, 2, border_radius=8)
-    txt_code_title = font.render("Algorithm Code", True, TEXT_COLOR)
-    screen.blit(txt_code_title, (585, 30))
+    screen.blit(font.render("Algorithm Code", True, BRIGHT_TEXT), (585, 30))
 
+    # 3. Stack Beaker Panel (Bottom Right)
     stack_rect = pygame.Rect(570, 305, 315, 285)
     pygame.draw.rect(screen, PANEL_BG, stack_rect, border_radius=8)
     pygame.draw.rect(screen, BORDER_COLOR, stack_rect, 2, border_radius=8)
-    txt_stack_title = font.render("Call Stack (Beaker View)", True, TEXT_COLOR)
-    screen.blit(txt_stack_title, (585, 320))
+    screen.blit(font.render("Call Stack (Beaker View)", True, BRIGHT_TEXT), (585, 320))
 
 def draw_screen_manual(screen, font):
     screen.fill(BG_COLOR)

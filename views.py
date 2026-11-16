@@ -14,23 +14,32 @@ solver_num_disks = 3
 solver_state = "idle"  # "idle", "solving", "completed"
 solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
 solver_generator = None
-animation_frame_counter = 0
-ANIMATION_DELAY = 15  # Adjust speed here if needed (framerates per move)
 
 # Smooth animation states
 solver_state = "idle"       # "idle", "solving", "completed"
 current_anim_move = None    # Holds (disk, src, tgt)
 anim_phase = None           # "LIFT", "SLIDE", "DROP"
+
+# Step counter and solver states
+solver_num_disks = 3
+solver_state = "idle"
+solver_current_step = 0
+solver_total_steps = (2 ** solver_num_disks) - 1
 anim_disk_pos = [0, 0]      # Current floating pixel (x, y)
 anim_target_y = 0           # Target landing y coordinate
-ANIMATION_SPEED = 8         # Pixels per frame for smooth glide speed
+ANIMATION_SPEED = 12        # Pixels per frame for smooth glide speed (1 to 4: Slow & Cinematic, 6 to 12: Smooth & Balanced, 15 to 30+: Fast & Teleporting)
+
+# Code panel runtime state
+active_code_line = 1
+current_recursion_depth = 1
+active_code_n = 3  # Track real runtime n value
 
 def toggle_mode():
     global current_mode
     current_mode = "manual" if current_mode == "solver" else "solver"
 
 def handle_events_solver(event):
-    global current_mode, solver_num_disks, solver_state, solver_pegs, solver_generator, animation_frame_counter, current_anim_move
+    global current_mode, solver_num_disks, solver_state, solver_pegs, solver_generator, animation_frame_counter, current_anim_move, solver_current_step, solver_total_steps
     if event.type == pygame.MOUSEBUTTONDOWN:
         btn_mode_rect = pygame.Rect(30, 545, 150, 32)
         if btn_mode_rect.collidepoint(event.pos):
@@ -42,15 +51,17 @@ def handle_events_solver(event):
         btn_solve_rect = pygame.Rect(190, 545, 110, 32)
         if btn_solve_rect.collidepoint(event.pos):
             if solver_state == "idle":
-                # Start solving
                 solver_state = "solving"
-                solver_generator = hanoi_moves_generator(solver_num_disks, 0, 2, 1)
-                animation_frame_counter = 0
+                solver_generator = hanoi_moves_generator(solver_num_disks)
+                current_anim_move = None
             elif solver_state == "completed":
-                # Reset solver
+                # --- FIX HERE: Reset pegs, state, and step counter ---
                 solver_state = "idle"
                 solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
                 solver_generator = None
+                current_anim_move = None
+                solver_current_step = 0
+                solver_total_steps = (2 ** solver_num_disks) - 1
             return
 
         # Lock disk counter buttons while solving
@@ -66,12 +77,17 @@ def handle_events_solver(event):
             solver_state = "idle"  # <--- Reset state to idle
             solver_generator = None
             current_anim_move = None
+            solver_total_steps = (2 ** solver_num_disks) - 1
+            solver_current_step = 0
+
         elif btn_plus.collidepoint(event.pos):
             solver_num_disks = min(15, solver_num_disks + 1)
             solver_pegs = [list(range(solver_num_disks, 0, -1)), [], []]
             solver_state = "idle"  # <--- Reset state to idle
             solver_generator = None
             current_anim_move = None
+            solver_total_steps = (2 ** solver_num_disks) - 1
+            solver_current_step = 0
 
 def handle_events_manual(event):
     global current_mode
@@ -265,7 +281,7 @@ def draw_solver_towers(screen, font):
         screen.blit(num_surf, num_rect)
 
 def update_solver_animation():
-    global solver_state, solver_generator, solver_pegs, current_anim_move, anim_phase, anim_disk_pos, anim_target_y
+    global solver_state, solver_generator, solver_pegs, current_anim_move, anim_phase, anim_disk_pos, anim_target_y, solver_current_step
     
     panel_left = 15
     panel_top = 15
@@ -276,19 +292,24 @@ def update_solver_animation():
     if solver_state == "solving":
         if current_anim_move is None and solver_generator is not None:
             try:
-                disk, src, tgt = next(solver_generator)
-                if solver_pegs[src]:
-                    # Pop disk from source model immediately for tracking, animate it
-                    d = solver_pegs[src].pop()
-                    current_anim_move = (d, src, tgt)
-                    
-                    # Start LIFT phase from current source top position
-                    src_level = len(solver_pegs[src]) # level after pop
-                    start_x = peg_centers[src]
-                    start_y = base_y - (src_level * (disk_height + 2)) - disk_height // 2
-                    
-                    anim_disk_pos = [float(start_x), float(start_y)]
-                    anim_phase = "LIFT"
+                item = next(solver_generator)
+                current_n, src, tgt, line_num, depth, disk = item
+                global active_code_line, current_recursion_depth, active_code_n
+                active_code_line = line_num
+                current_recursion_depth = depth
+                active_code_n = current_n  # <--- Captures the real n of this frame!
+
+                if disk is not None:  # Actual disk move triggered at line 4
+                    if solver_pegs[src]:
+                        d = solver_pegs[src].pop()
+                        current_anim_move = (d, src, tgt)
+                        
+                        src_level = len(solver_pegs[src])
+                        start_x = peg_centers[src]
+                        start_y = base_y - (src_level * (disk_height + 2)) - disk_height // 2
+                        
+                        anim_disk_pos = [float(start_x), float(start_y)]
+                        anim_phase = "LIFT"
             except StopIteration:
                 solver_state = "completed"
                 solver_generator = None
@@ -324,14 +345,54 @@ def update_solver_animation():
                     anim_phase = "DROP"
 
             elif anim_phase == "DROP":
-                # Lower downward onto target peg stack
                 if anim_disk_pos[1] < landing_y:
                     anim_disk_pos[1] = min(landing_y, anim_disk_pos[1] + ANIMATION_SPEED)
                 else:
-                    # Animation step finished: push disk onto target peg
                     solver_pegs[tgt].append(disk)
                     current_anim_move = None
                     anim_phase = None
+                    solver_current_step += 1
+
+def draw_algorithm_code_panel(screen, font):
+    code_rect = pygame.Rect(570, 15, 315, 275)
+    pygame.draw.rect(screen, PANEL_BG, code_rect, border_radius=8)
+    pygame.draw.rect(screen, BORDER_COLOR, code_rect, 2, border_radius=8)
+    
+    # Title
+    screen.blit(font.render("Algorithm Code", True, (240, 245, 250)), (585, 25))
+
+    # Inner code container box
+    inner_box = pygame.Rect(582, 58, 291, 202)
+    pygame.draw.rect(screen, (25, 29, 36), inner_box, border_radius=6)
+    pygame.draw.rect(screen, BORDER_COLOR, inner_box, 1, border_radius=6)
+
+    # Your preferred font setting
+    code_font = pygame.font.SysFont("Courier New", 17, True)  
+
+    d_n = active_code_n if solver_state == "solving" else solver_num_disks
+
+    code_lines = [
+        f"def solve(n={d_n}, A, C, B):",
+        "    if n == 0:",
+        "        return",
+        "    solve(n - 1, A, B, C)",
+        "    move(n, A, C)",
+        "    solve(n - 1, B, C, A)"
+    ]
+
+    # Render code lines with active line highlight
+    line_y = inner_box.y + 10
+    for idx, text in enumerate(code_lines, start=1):
+        line_color = (150, 160, 170)
+        
+        if solver_state == "solving" and active_code_line == idx:
+            hl_rect = pygame.Rect(inner_box.x + 4, line_y - 2, inner_box.width - 8, 24)
+            pygame.draw.rect(screen, (40, 60, 50), hl_rect, border_radius=4)
+            line_color = (152, 195, 121)  # Accent green
+
+        txt_surf = code_font.render(text, True, line_color)
+        screen.blit(txt_surf, (inner_box.x + 8, line_y))
+        line_y += 32
 
 def draw_screen_solver(screen, font):
     screen.fill(BG_COLOR)
@@ -396,11 +457,24 @@ def draw_screen_solver(screen, font):
     btn_plus = pygame.Rect(500, 549, 24, 24)
     draw_button(screen, font, "+", btn_plus, active=False)
 
+    # --- Step Counter at top right of main panel ---
+    min_steps = (2 ** solver_num_disks) - 1
+    step_text = f"Steps: [{solver_current_step} / {min_steps}]"
+    
+    # Render Step Counter text and background container box
+    step_surf = font.render(step_text, True, BRIGHT_TEXT)
+    step_padding = 10
+    step_box_rect = pygame.Rect(0, 0, step_surf.get_width() + (step_padding * 2), 28)
+    step_box_rect.topright = (545, 26)  # Aligned near top-right of main box
+    
+    pygame.draw.rect(screen, (35, 39, 46), step_box_rect, border_radius=6)
+    pygame.draw.rect(screen, BORDER_COLOR, step_box_rect, 1, border_radius=6)
+    
+    screen.blit(step_surf, (step_box_rect.x + step_padding, step_box_rect.y + 5))
+
     # 2. Code Panel (Top Right)
-    code_rect = pygame.Rect(570, 15, 315, 275)
-    pygame.draw.rect(screen, PANEL_BG, code_rect, border_radius=8)
-    pygame.draw.rect(screen, BORDER_COLOR, code_rect, 2, border_radius=8)
-    screen.blit(font.render("Algorithm Code", True, BRIGHT_TEXT), (585, 30))
+    # 2. Code Panel (Top Right)
+    draw_algorithm_code_panel(screen, font)
 
     # 3. Stack Beaker Panel (Bottom Right)
     stack_rect = pygame.Rect(570, 305, 315, 285)

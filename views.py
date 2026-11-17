@@ -4,7 +4,7 @@ from hanoi_model import HanoiModel
 from algorithm import hanoi_moves_generator
 
 # Global state and model instances
-current_mode = "solver"
+current_mode = "manual"
 hanoi_game = HanoiModel(num_disks=3)
 
 # Solver mode specific state
